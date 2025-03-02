@@ -142,6 +142,5 @@
     },
     // Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
     "remoteUser": "devuser",
-    "postCreateCommand": "./init-setup.sh",
-    "postStartCommand": "./gradlew bootRun --no-daemon -Dspring-boot.run.fork=true -Dserver.address=0.0.0.0"
+    "postStartCommand": "./init-setup.sh && ./gradlew bootRun --no-daemon -Dspring-boot.run.fork=true -Dserver.address=0.0.0.0"
 }
