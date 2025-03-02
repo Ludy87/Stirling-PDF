@@ -7,32 +7,46 @@
         "context": "..",
         // Update the 'dockerFile' property if you aren't using the standard 'Dockerfile' filename.
         "dockerfile": "../Dockerfile.dev",
-        "args": {}
-        },
-    // Use 'forwardPorts' to make a list of ports inside the container available locally.
-    "forwardPorts": [
-        "8080:8080",
-        2003
-    ],
-    "portsAttributes": {
-        "8080": {
-            "visibility": "public"
-        },
-        "2003": {
-            "visibility": "public"
-        }
     },
-    "appPort": [8080, 2003],
-    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
-    "mounts": [
-      "source=logs-volume,target=/workspace/logs,type=volume"
-    ],
-    "workspaceFolder": "/workspace",
+    // Use 'forwardPorts' to make a list of ports inside the container available locally.
+    // "forwardPorts": [
+    //     "8080:8080",
+    //     2003
+    // ],
+    // "features": {
+    //   "ghcr.io/devcontainers/features/github-cli:1": {}
+    // },
+    // "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder}",
+    // "portsAttributes": {
+    //     "8080": {
+    //         "visibility": "public"
+    //     },
+    //     "2003": {
+    //         "visibility": "public"
+    //     }
+    // },
+    // "appPort": [8080, 2003],
+    // "runArgs": [
+    //   "-e",
+    //   "GIT_EDITOR=code --wait",
+    //   "--security-opt",
+    //   "label=disable"
+    // ],
+    // "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+    // "mounts": [
+    //   "source=logs-volume,target=/workspace/logs,type=volume"
+    // ],
+    // "workspaceFolder": "/workspace",
     // Configure tool-specific properties.
     "customizations": {
         "vscode": {
             "settings": {
-                "terminal.integrated.shell.linux": "/bin/bash",
+                "terminal.integrated.profiles.linux": {
+                  "zsh": {
+                    "path": "/usr/bin/zsh"
+                  }
+                },
+                "terminal.integrated.defaultProfile.linux": "zsh",
                 "editor.wordSegmenterLocales": "",
                 "editor.guides.bracketPairs": "active",
                 "editor.guides.bracketPairsHorizontal": "active",
@@ -98,7 +112,10 @@
                 "java.import.gradle.wrapper.enabled": true,
                 "spring.initializr.defaultLanguage": "Java",
                 "spring.initializr.defaultGroupId": "stirling.software.SPDF",
-                "spring.initializr.defaultArtifactId": "SPDF"
+                "spring.initializr.defaultArtifactId": "SPDF",
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff"
+                }
             },
             "extensions": [
                 "elagil.pre-commit-helper", // Support for pre-commit hooks to enforce code quality
@@ -116,6 +133,10 @@
                 "vscjava.vscode-spring-initializr", // Support for Spring Initializr to create new Spring projects
                 "EditorConfig.EditorConfig", // EditorConfig support for maintaining consistent coding styles
                 "ms-azuretools.vscode-docker", // Docker extension for Visual Studio Code
+                "GitHub.copilot", // GitHub Copilot AI pair programmer for Visual Studio Code
+                "GitHub.vscode-pull-request-github", // GitHub Pull Requests extension for Visual Studio Code
+                "redhat.vscode-yaml", // YAML support for Visual Studio Code
+                "charliermarsh.ruff" // Python code formatter using Ruff
             ]
         }
     },
