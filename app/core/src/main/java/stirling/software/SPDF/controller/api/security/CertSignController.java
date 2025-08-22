@@ -4,6 +4,8 @@ import java.awt.*;
 import java.beans.PropertyEditorSupport;
 import java.io.*;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.*;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
@@ -73,6 +75,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import stirling.software.SPDF.model.api.security.SignPDFWithCertRequest;
+import stirling.software.common.configuration.InstallationPathConfig;
 import stirling.software.common.service.CustomPDFDocumentFactory;
 import stirling.software.common.util.ExceptionUtils;
 import stirling.software.common.util.WebResponseUtils;
@@ -258,13 +261,24 @@ public class CertSignController {
                         IOException,
                         CertificateException {
             super(keystore, pin);
-            ClassPathResource resource = new ClassPathResource("static/images/signature.png");
-            try (InputStream is = resource.getInputStream()) {
-                logoFile = Files.createTempFile("signature", ".png").toFile();
-                FileUtils.copyInputStreamToFile(is, logoFile);
-            } catch (IOException e) {
-                log.error("Failed to load image signature file");
-                throw e;
+            Path customLogo =
+                    Paths.get(
+                            InstallationPathConfig.getStaticPath()
+                                    + "images"
+                                    + File.separator
+                                    + "signature.png");
+
+            if (Files.exists(customLogo)) {
+                logoFile = customLogo.toFile();
+            } else {
+                ClassPathResource resource = new ClassPathResource("static/images/signature.png");
+                try (InputStream is = resource.getInputStream()) {
+                    logoFile = Files.createTempFile("signature", ".png").toFile();
+                    FileUtils.copyInputStreamToFile(is, logoFile);
+                } catch (IOException e) {
+                    log.error("Failed to load image signature file");
+                    throw e;
+                }
             }
         }
 
@@ -308,17 +322,21 @@ public class CertSignController {
                 widget.setAppearance(appearance);
 
                 try (PDPageContentStream cs = new PDPageContentStream(doc, appearanceStream)) {
-                    if (Boolean.TRUE.equals(showLogo)) {
-                        cs.saveGraphicsState();
-                        PDExtendedGraphicsState extState = new PDExtendedGraphicsState();
-                        extState.setBlendMode(BlendMode.MULTIPLY);
-                        extState.setNonStrokingAlphaConstant(0.5f);
-                        cs.setGraphicsStateParameters(extState);
-                        cs.transform(Matrix.getScaleInstance(0.08f, 0.08f));
-                        PDImageXObject img =
-                                PDImageXObject.createFromFileByExtension(logoFile, doc);
-                        cs.drawImage(img, 100, 0);
-                        cs.restoreGraphicsState();
+                    if (Boolean.TRUE.equals(showLogo) && logoFile != null) {
+                        try {
+                            cs.saveGraphicsState();
+                            PDExtendedGraphicsState extState = new PDExtendedGraphicsState();
+                            extState.setBlendMode(BlendMode.MULTIPLY);
+                            extState.setNonStrokingAlphaConstant(0.5f);
+                            cs.setGraphicsStateParameters(extState);
+                            cs.transform(Matrix.getScaleInstance(0.08f, 0.08f));
+                            PDImageXObject img =
+                                    PDImageXObject.createFromFileByExtension(logoFile, doc);
+                            cs.drawImage(img, 100, 0);
+                            cs.restoreGraphicsState();
+                        } catch (IOException | RuntimeException e) {
+                            log.warn("Signature image is invalid, skipping logo rendering", e);
+                        }
                     }
 
                     // show text
