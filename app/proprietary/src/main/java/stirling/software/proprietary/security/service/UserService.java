@@ -117,6 +117,7 @@ public class UserService implements UserServiceInterface {
         return addApiKeyToUser(username);
     }
 
+    @Override
     public String getApiKeyForUser(String username) {
         User user =
                 findByUsernameIgnoreCase(username)
@@ -539,6 +540,38 @@ public class UserService implements UserServiceInterface {
         }
     }
 
+    @Override
+    public String getCurrentUserRoleWithoutDemoAndInternal() {
+        Optional<User> user = findByUsername(getCurrentUsername());
+        return user.map(
+                        u ->
+                                u.getAuthorities().stream()
+                                        .map(Authority::getAuthority)
+                                        .filter(
+                                                role ->
+                                                        !Role.DEMO_USER.getRoleId().equals(role)
+                                                                && !Role.INTERNAL_API_USER
+                                                                        .getRoleId()
+                                                                        .equals(role))
+                                        .findFirst()
+                                        .orElse(null))
+                .orElse(null);
+    }
+
+    // Get the current user's role
+    @Override
+    public String getCurrentUserRole() {
+        Optional<User> user = findByUsername(getCurrentUsername());
+        if (user.isPresent()) {
+            return user.get().getAuthorities().stream()
+                    .map(Authority::getAuthority)
+                    .findFirst()
+                    .orElse(null);
+        }
+        return null;
+    }
+
+    @Override
     public String getCurrentUsername() {
         Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
 
@@ -595,6 +628,7 @@ public class UserService implements UserServiceInterface {
         }
     }
 
+    @Override
     public long getTotalUsersCount() {
         // Count all users in the database
         long userCount = userRepository.count();

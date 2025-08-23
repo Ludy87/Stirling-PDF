@@ -6,4 +6,8 @@ public interface UserServiceInterface {
     String getCurrentUsername();
 
     long getTotalUsersCount();
+
+    String getCurrentUserRole();
+
+    String getCurrentUserRoleWithoutDemoAndInternal();
 }

@@ -55,6 +55,7 @@ import org.bouncycastle.operator.InputDecryptorProvider;
 import org.bouncycastle.operator.OperatorCreationException;
 import org.bouncycastle.pkcs.PKCS8EncryptedPrivateKeyInfo;
 import org.bouncycastle.pkcs.PKCSException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -71,12 +72,12 @@ import io.micrometer.common.util.StringUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import stirling.software.SPDF.model.api.security.SignPDFWithCertRequest;
 import stirling.software.common.configuration.InstallationPathConfig;
 import stirling.software.common.service.CustomPDFDocumentFactory;
+import stirling.software.common.service.UserServiceInterface;
 import stirling.software.common.util.ExceptionUtils;
 import stirling.software.common.util.WebResponseUtils;
 
@@ -84,8 +85,22 @@ import stirling.software.common.util.WebResponseUtils;
 @RequestMapping("/api/v1/security")
 @Slf4j
 @Tag(name = "Security", description = "Security APIs")
-@RequiredArgsConstructor
 public class CertSignController {
+
+    private static final int MAX_USERS = 5;
+
+    private final CustomPDFDocumentFactory pdfDocumentFactory;
+    private final UserServiceInterface userService;
+    private final boolean runningProOrHigher;
+
+    public CertSignController(
+            UserServiceInterface userService,
+            @Qualifier("runningProOrHigher") boolean runningProOrHigher,
+            CustomPDFDocumentFactory pdfDocumentFactory) {
+        this.userService = userService;
+        this.pdfDocumentFactory = pdfDocumentFactory;
+        this.runningProOrHigher = runningProOrHigher;
+    }
 
     static {
         Security.addProvider(new BouncyCastleProvider());
@@ -102,8 +117,6 @@ public class CertSignController {
                     }
                 });
     }
-
-    private final CustomPDFDocumentFactory pdfDocumentFactory;
 
     private static void sign(
             CustomPDFDocumentFactory pdfDocumentFactory,
@@ -268,7 +281,10 @@ public class CertSignController {
                                     + File.separator
                                     + "signature.png");
 
-            if (Files.exists(customLogo)) {
+            boolean hasUserRole = userService.getCurrentUserRoleWithoutDemoAndInternal() != null;
+            boolean isFreeUserLimit = hasUserRole && userService.getTotalUsersCount() <= MAX_USERS;
+
+            if (Files.exists(customLogo) && (isFreeUserLimit || runningProOrHigher)) {
                 logoFile = customLogo.toFile();
             } else {
                 ClassPathResource resource = new ClassPathResource("static/images/signature.png");
