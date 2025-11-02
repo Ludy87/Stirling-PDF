@@ -1,10 +1,6 @@
 package stirling.software.SPDF.service;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -15,12 +11,24 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+import org.springframework.ai.model.NoopApiKey;
+import org.springframework.ai.ollama.api.OllamaApi;
+import org.springframework.ai.ollama.api.OllamaApi.ChatRequest;
+import org.springframework.ai.ollama.api.OllamaApi.Message;
+import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.openai.api.OpenAiApi.ChatCompletion;
+import org.springframework.ai.openai.api.OpenAiApi.ChatCompletionMessage;
+import org.springframework.ai.openai.api.OpenAiApi.ChatCompletionRequest;
+import org.springframework.ai.openai.api.ResponseFormat;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import lombok.RequiredArgsConstructor;
@@ -175,9 +183,9 @@ public class LlmTranslationService {
 
     private String resolveBaseUrl(ApplicationProperties.System.Llm config, ProviderType provider) {
         if (StringUtils.hasText(config.getBaseUrl())) {
-            return config.getBaseUrl().trim();
+            return normalizeBaseUrl(config.getBaseUrl());
         }
-        return provider.getDefaultBaseUrl();
+        return normalizeBaseUrl(provider.getDefaultBaseUrl());
     }
 
     private String buildSystemPrompt(
@@ -228,114 +236,171 @@ public class LlmTranslationService {
             double temperature)
             throws Exception {
 
-        ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("model", model);
-
-        ArrayNode messages = payload.putArray("messages");
-        ObjectNode systemNode = messages.addObject();
-        systemNode.put("role", "system");
-        systemNode.put("content", prompt);
-
         ObjectNode chunkContent = objectMapper.createObjectNode();
         for (PdfPageText page : chunk) {
             chunkContent.put(String.valueOf(page.getPageNumber()), page.getText());
         }
 
-        ObjectNode userNode = messages.addObject();
-        userNode.put("role", "user");
-        userNode.put("content", objectMapper.writeValueAsString(chunkContent));
+        String chunkPayload = objectMapper.writeValueAsString(chunkContent);
 
-        payload.put("stream", false);
-        payload.put("temperature", temperature);
+        String assistantContent =
+                switch (provider) {
+                    case OPENAI_COMPATIBLE ->
+                            callOpenAi(
+                                    chunkPayload,
+                                    baseUrl,
+                                    model,
+                                    prompt,
+                                    config,
+                                    timeout,
+                                    temperature);
+                    case OLLAMA ->
+                            callOllama(chunkPayload, baseUrl, model, prompt, timeout, temperature);
+                };
 
-        if (provider == ProviderType.OPENAI_COMPATIBLE) {
-            ObjectNode responseFormat = objectMapper.createObjectNode();
-            responseFormat.put("type", "json_object");
-            payload.set("response_format", responseFormat);
-        } else {
-            ObjectNode optionsNode = payload.putObject("options");
-            optionsNode.put("temperature", temperature);
-        }
-
-        URI endpoint = provider.resolveEndpoint(baseUrl);
-        String requestBody = objectMapper.writeValueAsString(payload);
-        Map<String, String> headers = buildHeaders(config);
-
-        String rawResponse = performRequest(provider, endpoint, requestBody, headers, timeout);
-        String assistantContent = extractAssistantContent(rawResponse, provider);
         Map<Integer, String> parsed = parseTranslationResponse(assistantContent, chunk);
         ensureAllPagesPresent(parsed.keySet(), chunk);
         return parsed;
     }
 
-    private Map<String, String> buildHeaders(ApplicationProperties.System.Llm config) {
-        Map<String, String> headers = new LinkedHashMap<>();
-        headers.put("Content-Type", "application/json");
+    private String callOpenAi(
+            String chunkPayload,
+            String baseUrl,
+            String model,
+            String prompt,
+            ApplicationProperties.System.Llm config,
+            Duration timeout,
+            double temperature) {
+
+        List<ChatCompletionMessage> messages = new ArrayList<>();
+        messages.add(new ChatCompletionMessage(prompt, ChatCompletionMessage.Role.SYSTEM));
+        messages.add(new ChatCompletionMessage(chunkPayload, ChatCompletionMessage.Role.USER));
+
+        ResponseFormat responseFormat =
+                ResponseFormat.builder().type(ResponseFormat.Type.JSON_OBJECT).build();
+
+        OpenAiApi.Builder builder =
+                OpenAiApi.builder()
+                        .baseUrl(baseUrl)
+                        .completionsPath(ProviderType.OPENAI_COMPATIBLE.getEndpointPath())
+                        .restClientBuilder(createRestClientBuilder(timeout))
+                        .webClientBuilder(createWebClientBuilder());
+
         if (StringUtils.hasText(config.getApiKey())) {
-            headers.put("Authorization", "Bearer " + config.getApiKey().trim());
+            builder.apiKey(config.getApiKey().trim());
+        } else {
+            builder.apiKey(new NoopApiKey());
         }
-        return headers;
+
+        OpenAiApi api = builder.build();
+
+        ChatCompletionRequest request =
+                new ChatCompletionRequest(
+                        messages,
+                        model,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        responseFormat,
+                        null,
+                        null,
+                        null,
+                        false,
+                        null,
+                        temperature,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        ResponseEntity<ChatCompletion> response = api.chatCompletionEntity(request);
+        ChatCompletion completion = response.getBody();
+        if (completion == null || completion.choices() == null || completion.choices().isEmpty()) {
+            throw new IllegalStateException("Translation response did not include choices");
+        }
+
+        ChatCompletionMessage assistantMessage = completion.choices().get(0).message();
+        if (assistantMessage == null || !StringUtils.hasText(assistantMessage.content())) {
+            throw new IllegalStateException(
+                    "Translation response did not include assistant content");
+        }
+
+        return assistantMessage.content();
     }
 
-    protected String performRequest(
-            ProviderType provider,
-            URI uri,
-            String requestBody,
-            Map<String, String> headers,
-            Duration timeout)
-            throws IOException, InterruptedException {
-        HttpClient client = HttpClient.newBuilder().connectTimeout(timeout).build();
-        HttpRequest.Builder builder =
-                HttpRequest.newBuilder()
-                        .uri(uri)
-                        .timeout(timeout)
-                        .POST(HttpRequest.BodyPublishers.ofString(requestBody));
+    private String callOllama(
+            String chunkPayload,
+            String baseUrl,
+            String model,
+            String prompt,
+            Duration timeout,
+            double temperature) {
 
-        headers.forEach(builder::header);
+        List<Message> messages = new ArrayList<>();
+        messages.add(Message.builder(Message.Role.SYSTEM).content(prompt).build());
+        messages.add(Message.builder(Message.Role.USER).content(chunkPayload).build());
 
-        HttpResponse<String> response =
-                client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() >= 400) {
-            String body = response.body();
-            String truncated =
-                    body != null && body.length() > 500 ? body.substring(0, 500) + "..." : body;
-            throw ExceptionUtils.createRuntimeException(
-                    "translatePdf.error.httpFailure",
-                    "Translation request failed with status {0} and body: {1}",
-                    null,
-                    response.statusCode(),
-                    truncated);
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("temperature", temperature);
+
+        ChatRequest request =
+                ChatRequest.builder(model)
+                        .messages(messages)
+                        .format("json")
+                        .options(options)
+                        .build();
+
+        OllamaApi api =
+                OllamaApi.builder()
+                        .baseUrl(baseUrl)
+                        .restClientBuilder(createRestClientBuilder(timeout))
+                        .webClientBuilder(createWebClientBuilder())
+                        .build();
+
+        Message assistantMessage = api.chat(request).message();
+        if (assistantMessage == null || !StringUtils.hasText(assistantMessage.content())) {
+            throw new IllegalStateException(
+                    "Translation response did not include assistant content");
         }
-        return response.body();
+        return assistantMessage.content();
     }
 
-    String extractAssistantContent(String responseBody, ProviderType provider) throws IOException {
-        JsonNode root = objectMapper.readTree(responseBody);
+    private RestClient.Builder createRestClientBuilder(Duration timeout) {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        int millis = (int) Math.min(Integer.MAX_VALUE, timeout.toMillis());
+        requestFactory.setConnectTimeout(millis);
+        requestFactory.setReadTimeout(millis);
+        return RestClient.builder().requestFactory(requestFactory);
+    }
 
-        if (root.has("choices")
-                && root.get("choices").isArray()
-                && root.get("choices").size() > 0) {
-            JsonNode choice = root.get("choices").get(0);
-            if (choice.has("message")) {
-                JsonNode message = choice.get("message");
-                if (message.has("content")) {
-                    return message.get("content").asText();
-                }
-            }
-            if (choice.has("text")) {
-                return choice.get("text").asText();
-            }
+    private WebClient.Builder createWebClientBuilder() {
+        return WebClient.builder();
+    }
+
+    private String normalizeBaseUrl(String baseUrl) {
+        if (!StringUtils.hasText(baseUrl)) {
+            return "";
         }
 
-        if (root.has("message") && root.get("message").has("content")) {
-            return root.get("message").get("content").asText();
+        String normalized = baseUrl.trim();
+        if (normalized.endsWith("/")) {
+            return normalized.substring(0, normalized.length() - 1);
         }
 
-        if (root.has("output_text")) {
-            return root.get("output_text").asText();
-        }
-
-        throw new IllegalStateException("Translation response did not include assistant content");
+        return normalized;
     }
 
     Map<Integer, String> parseTranslationResponse(String content, List<PdfPageText> chunk)
@@ -346,16 +411,38 @@ public class LlmTranslationService {
             throw new IllegalStateException("Translation response was not a JSON object");
         }
 
+        Set<Integer> present = new LinkedHashSet<>();
+        root.fieldNames()
+                .forEachRemaining(
+                        fn -> {
+                            try {
+                                present.add(Integer.parseInt(fn));
+                            } catch (NumberFormatException ignore) {
+                            }
+                        });
+
         Map<Integer, String> results = new LinkedHashMap<>();
         for (PdfPageText page : chunk) {
             JsonNode node = root.get(String.valueOf(page.getPageNumber()));
-            if (node == null || node.isNull()) {
-                results.put(page.getPageNumber(), "");
-            } else {
+            if (node != null && !node.isNull()) {
                 results.put(page.getPageNumber(), node.asText());
+            } else {
+                results.put(page.getPageNumber(), "");
             }
         }
+
+        ensureAllPagesPresentFromJson(present, chunk);
         return results;
+    }
+
+    private void ensureAllPagesPresentFromJson(Set<Integer> present, List<PdfPageText> chunk) {
+        Set<Integer> required = new LinkedHashSet<>();
+        for (PdfPageText page : chunk) required.add(page.getPageNumber());
+        if (!present.containsAll(required)) {
+            Set<Integer> missing = new LinkedHashSet<>(required);
+            missing.removeAll(present);
+            throw new IllegalStateException("Translation response was missing pages: " + missing);
+        }
     }
 
     String cleanupAssistantContent(String content) {
@@ -364,13 +451,13 @@ public class LlmTranslationService {
         }
         String trimmed = content.trim();
         if (trimmed.startsWith("```")) {
-            trimmed = trimmed.substring(trimmed.indexOf("\n") + 1);
-            int closingIndex = trimmed.lastIndexOf("```\n");
-            if (closingIndex >= 0) {
-                trimmed = trimmed.substring(0, closingIndex);
-            } else if (trimmed.endsWith("```")) {
-                trimmed = trimmed.substring(0, trimmed.length() - 3);
+            int firstNl = trimmed.indexOf('\n');
+            if (firstNl > 0) {
+                trimmed = trimmed.substring(firstNl + 1);
             }
+        }
+        if (trimmed.endsWith("```")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 3);
         }
         return trimmed.trim();
     }
@@ -406,13 +493,8 @@ public class LlmTranslationService {
             return defaultBaseUrl;
         }
 
-        public URI resolveEndpoint(String baseUrl) {
-            String normalizedBase =
-                    StringUtils.hasText(baseUrl) ? baseUrl.trim() : getDefaultBaseUrl();
-            if (normalizedBase.endsWith("/")) {
-                normalizedBase = normalizedBase.substring(0, normalizedBase.length() - 1);
-            }
-            return URI.create(normalizedBase + endpointPath);
+        public String getEndpointPath() {
+            return endpointPath;
         }
 
         static ProviderType from(String value) {
