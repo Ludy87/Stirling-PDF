@@ -36,6 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import stirling.software.common.configuration.InstallationPathConfig;
 import stirling.software.common.configuration.YamlPropertySourceFactory;
+import stirling.software.common.model.ApplicationProperties.DatabaseBackup;
 import stirling.software.common.model.exception.UnsupportedProviderException;
 import stirling.software.common.model.oauth2.GitHubProvider;
 import stirling.software.common.model.oauth2.GoogleProvider;
@@ -294,8 +295,8 @@ public class ApplicationProperties {
                                 throw new UnsupportedProviderException(
                                         "Logout from the provider "
                                                 + registrationId
-                                                + " is not supported. "
-                                                + "Report it at https://github.com/Stirling-Tools/Stirling-PDF/issues");
+                                                + " is not supported. Report it at"
+                                                + " https://github.com/Stirling-Tools/Stirling-PDF/issues");
                     };
                 }
             }
@@ -331,6 +332,7 @@ public class ApplicationProperties {
         private String fileUploadLimit;
         private TempFileManagement tempFileManagement = new TempFileManagement();
         private DatabaseBackup databaseBackup = new DatabaseBackup();
+        private Llm llm = new Llm();
 
         public boolean isAnalyticsEnabled() {
             return this.getEnableAnalytics() != null && this.getEnableAnalytics();
@@ -346,6 +348,24 @@ public class ApplicationProperties {
             // Treat null as enabled when analytics is enabled
             return this.isAnalyticsEnabled()
                     && (this.getEnableScarf() == null || this.getEnableScarf());
+        }
+
+        @Data
+        public static class Llm {
+            private boolean enabled = false;
+            private String provider = "openai";
+            private String baseUrl = "https://api.openai.com/v1";
+            private String apiKey;
+            private String model = "gpt-4o-mini";
+            private int maxChunkCharacters = 4000;
+            private int requestTimeoutSeconds = 60;
+            private Double temperature = 0.2d;
+            private String defaultPrompt;
+            private boolean allowModelOverride = true;
+            private boolean allowProviderOverride = true;
+            private boolean allowCustomPrompt = true;
+            private boolean allowOriginalText = true;
+            private List<String> supportedFunctions = Arrays.asList("translation");
         }
     }
 
@@ -452,10 +472,10 @@ public class ApplicationProperties {
         @Override
         public String toString() {
             return """
-                Driver {
-                  driverName='%s'
-                }
-                """
+            Driver {
+              driverName='%s'
+            }
+            """
                     .formatted(driverName);
         }
     }

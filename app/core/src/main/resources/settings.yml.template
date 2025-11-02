@@ -159,6 +159,21 @@ system:
     cleanupIntervalMinutes: 30 # How often to run cleanup (in minutes)
     startupCleanup: true # Clean up old temp files on startup
     cleanupSystemTemp: false # Whether to clean broader system temp directory
+  llm:
+    enabled: false # Enable PDF translation via LLM
+    provider: openai # 'openai' for OpenAI-compatible endpoints or 'ollama' for Ollama API
+    baseUrl: https://api.openai.com/v1 # Base URL of the LLM service
+    apiKey: '' # API key for OpenAI-compatible services (leave empty for unauthenticated endpoints)
+    model: gpt-4o-mini # Default model to use when translating
+    temperature: 0.2 # Sampling temperature for translation responses
+    requestTimeoutSeconds: 60 # Timeout for each translation request
+    maxChunkCharacters: 4000 # Maximum characters sent per translation request
+    defaultPrompt: '' # Optional additional system prompt instructions
+    allowModelOverride: true # Allow users to override the model per request
+    allowProviderOverride: true # Allow users to override the provider per request
+    allowCustomPrompt: true # Allow users to append custom translation instructions
+    allowOriginalText: true # Allow including the original text in the output PDF
+    supportedFunctions: ['translation'] # translation
   databaseBackup:
     cron: '0 0 0 * * ?' # Cron expression for automatic database backups "0 0 0 * * ?" daily at midnight
 

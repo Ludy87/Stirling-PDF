@@ -95,7 +95,8 @@ public class EndpointConfiguration {
                     && disabledGroups.contains(group)
                     && endpointGroups.get(group).contains(endpoint)) {
                 log.debug(
-                        "isEndpointEnabled('{}') -> false (single tool group '{}' disabled, no alternatives)",
+                        "isEndpointEnabled('{}') -> false (single tool group '{}' disabled, no"
+                                + " alternatives)",
                         original,
                         group);
                 return false;
@@ -222,7 +223,8 @@ public class EndpointConfiguration {
                     String.join(", ", functionallyDisabledEndpoints));
         } else if (!disabledToolGroups.isEmpty()) {
             log.info(
-                    "No endpoints disabled despite missing tools - fallback implementations available");
+                    "No endpoints disabled despite missing tools - fallback implementations"
+                            + " available");
         }
     }
 
@@ -295,6 +297,7 @@ public class EndpointConfiguration {
         addEndpointToGroup("Other", "view-pdf");
         addEndpointToGroup("Other", "replace-and-invert-color-pdf");
         addEndpointToGroup("Other", "multi-tool");
+        addEndpointToGroup("Other", "translate-pdf");
 
         // Adding endpoints to "Advance" group
         addEndpointToGroup("Advance", "adjust-contrast");
@@ -393,6 +396,10 @@ public class EndpointConfiguration {
         addEndpointToGroup("Java", "compress-pdf");
         addEndpointToGroup("rar", "pdf-to-cbr");
         addEndpointToGroup("Java", "pdf-to-video");
+        addEndpointToGroup("Java", "translate-pdf");
+
+        // LLM
+        addEndpointToGroup("LLM", "translate-pdf");
 
         // Javascript
         addEndpointToGroup("Javascript", "pdf-organizer");
@@ -477,6 +484,18 @@ public class EndpointConfiguration {
 
         if (!applicationProperties.getSystem().getEnableUrlToPDF()) {
             disableEndpoint("url-to-pdf");
+        }
+
+        if (!applicationProperties.getSystem().getLlm().isEnabled()) {
+            disableGroup("LLM");
+        }
+
+        if (!applicationProperties
+                .getSystem()
+                .getLlm()
+                .getSupportedFunctions()
+                .contains("translation")) {
+            disableEndpoint("translate-pdf");
         }
     }
 
