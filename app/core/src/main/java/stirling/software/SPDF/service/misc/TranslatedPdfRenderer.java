@@ -146,17 +146,29 @@ public class TranslatedPdfRenderer {
             throws IOException {
         float usableWidth = pageWidth - (DEFAULT_MARGIN * 2);
         String headerOriginal =
-                messageSource.getMessage(
-                        "translatePdf.output.original", null, "Original text", Locale.ENGLISH);
+                sanitizeTextForFont(
+                        messageSource.getMessage(
+                                "translatePdf.output.original",
+                                null,
+                                "Original text",
+                                Locale.ENGLISH),
+                        font);
         String headerTranslation =
-                messageSource.getMessage(
-                        "translatePdf.output.translation", null, "Translated text", Locale.ENGLISH);
+                sanitizeTextForFont(
+                        messageSource.getMessage(
+                                "translatePdf.output.translation",
+                                null,
+                                "Translated text",
+                                Locale.ENGLISH),
+                        font);
         String emptyMessage =
-                messageSource.getMessage(
-                        "translatePdf.output.empty",
-                        null,
-                        "No translatable text detected on this page.",
-                        Locale.ENGLISH);
+                sanitizeTextForFont(
+                        messageSource.getMessage(
+                                "translatePdf.output.empty",
+                                null,
+                                "No translatable text detected on this page.",
+                                Locale.ENGLISH),
+                        font);
 
         List<String> lines = new ArrayList<>();
         if (includeOriginalText && pageText.hasContent()) {
@@ -188,13 +200,15 @@ public class TranslatedPdfRenderer {
             return wrapped;
         }
         String normalised = text.replace("\r\n", "\n");
-        String[] rawLines = normalised.split("\n", -1);
+        String sanitized = sanitizeTextForFont(normalised, font);
+        String[] rawLines = sanitized.split("\n", -1);
         for (String raw : rawLines) {
-            if (!StringUtils.hasText(raw)) {
+            String trimmed = raw != null ? raw.trim() : "";
+            if (!StringUtils.hasText(trimmed)) {
                 wrapped.add("");
                 continue;
             }
-            wrapped.addAll(wrapSingleParagraph(raw.trim(), font, fontSize, maxWidth));
+            wrapped.addAll(wrapSingleParagraph(trimmed, font, fontSize, maxWidth));
         }
         return wrapped;
     }
@@ -301,13 +315,6 @@ public class TranslatedPdfRenderer {
         return false;
     }
 
-    private float getStringWidth(PDFont font, String text, float fontSize) throws IOException {
-        if (!StringUtils.hasText(text)) {
-            return 0f;
-        }
-        return font.getStringWidth(text) / 1000f * fontSize;
-    }
-
     private void writePageContent(
             PDDocument document,
             PDRectangle pageSize,
@@ -317,17 +324,21 @@ public class TranslatedPdfRenderer {
             List<String> lines)
             throws IOException {
         String header =
-                messageSource.getMessage(
-                        "translatePdf.output.header",
-                        new Object[] {pageNumber},
-                        "Page " + pageNumber,
-                        Locale.ENGLISH);
+                sanitizeTextForFont(
+                        messageSource.getMessage(
+                                "translatePdf.output.header",
+                                new Object[] {pageNumber},
+                                "Page " + pageNumber,
+                                Locale.ENGLISH),
+                        font);
         String continuation =
-                messageSource.getMessage(
-                        "translatePdf.output.header.continued",
-                        new Object[] {pageNumber},
-                        "Page " + pageNumber + " (continued)",
-                        Locale.ENGLISH);
+                sanitizeTextForFont(
+                        messageSource.getMessage(
+                                "translatePdf.output.header.continued",
+                                new Object[] {pageNumber},
+                                "Page " + pageNumber + " (continued)",
+                                Locale.ENGLISH),
+                        font);
 
         float leading = fontSize * 1.4f;
         PageContext context =
@@ -417,5 +428,57 @@ public class TranslatedPdfRenderer {
                 closed = true;
             }
         }
+    }
+
+    private float getStringWidth(PDFont font, String text, float fontSize) throws IOException {
+        if (!StringUtils.hasText(text)) {
+            return 0f;
+        }
+        String sanitized = sanitizeTextForFont(text, font);
+        if (!StringUtils.hasText(sanitized)) {
+            return 0f;
+        }
+        return font.getStringWidth(sanitized) / 1000f * fontSize;
+    }
+
+    private String sanitizeTextForFont(String text, PDFont font) {
+        if (text == null || text.isEmpty() || font == null) {
+            return text;
+        }
+
+        String fallback = "?";
+        boolean fallbackSupported = true;
+        try {
+            font.encode(fallback);
+        } catch (IllegalArgumentException | IOException ex) {
+            fallback = "";
+            fallbackSupported = false;
+        }
+
+        StringBuilder sanitized = new StringBuilder(text.length());
+        for (int offset = 0; offset < text.length(); ) {
+            int codePoint = text.codePointAt(offset);
+            if (codePoint == '\n' || codePoint == '\r' || codePoint == '\t') {
+                sanitized.appendCodePoint(codePoint);
+                offset += Character.charCount(codePoint);
+                continue;
+            }
+
+            String character = new String(Character.toChars(codePoint));
+            try {
+                font.encode(character);
+                sanitized.append(character);
+            } catch (IllegalArgumentException | IOException ex) {
+                if (fallbackSupported) {
+                    sanitized.append(fallback);
+                }
+                log.debug(
+                        "Replacing unsupported character U+{} with fallback for font {}",
+                        String.format("%04X", codePoint),
+                        font.getName());
+            }
+            offset += Character.charCount(codePoint);
+        }
+        return sanitized.toString();
     }
 }
